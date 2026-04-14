@@ -1,5 +1,5 @@
 import "server-only";
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env.server";
 
 /**
  * Minimal in-memory fixed-window rate limiter with optional Upstash backing.

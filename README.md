@@ -41,7 +41,7 @@ The protocol exposes three primitives and lets anyone build on top of them: ZK-a
             │  Next.js server (Node.js)    │   │       HashKey Chain (L2)     │
             │                              │   │  ┌────────────────────────┐  │
             │  ┌────────────────────────┐  │   │  │   PoHRegistry          │  │
-            │  │ Anthropic Sonnet 4.6   │  │   │  │   - EIP-712 verify      │  │
+            │  │ DeepSeek-Chat (V3)     │  │   │  │   - EIP-712 verify      │  │
             │  │ + zod policy clamp     │  │   │  │   - nonce replay guard  │  │
             │  └─────────┬──────────────┘  │   │  └──────────┬─────────────┘  │
             │            │ tier/APR/line   │   │             │                │
@@ -90,7 +90,7 @@ PoHRegistry  ◀── reads ── CreditLine ──── BURNER_ROLE ──�
 4. Browser  → POST /api/score {borrower, merchantProfileRef}
 5. Server   → fixtureAdapter.fetchProfile(ref)           // RevenueAdapter
             → extractFeatures(profile, onChain)          // deterministic
-            → Anthropic.messages.create(...)             // ~3-5s
+            → DeepSeek chat.completions (JSON mode)      // ~1-3s
             → llmOutputSchema.parse(...)                 // zod
             → clamp aprBps & maxLine to TIER_POLICY
             → scorer.signTypedData(Score)                // EIP-712
@@ -125,12 +125,12 @@ PoHRegistry  ◀── reads ── CreditLine ──── BURNER_ROLE ──�
 │   │   ├── HKDm.sol            ERC20 + Permit + Pausable + AccessControl, 6 dp
 │   │   ├── PoHRegistry.sol     EIP-712 attestation registry, per-attestor nonce replay guard
 │   │   └── CreditLine.sol      Signed scoring oracle, simple-interest accrual, role-gated settlement
-│   ├── test/                   43 unit tests (HKDm 12 / PoHRegistry 11 / CreditLine 20)
+│   ├── test/                   48 tests — unit (43) + end-to-end integration (5)
 │   ├── script/Deploy.s.sol     One-shot deploy + role wiring; writes deployments/<chainId>.json
 │   └── deployments/            Per-chain deployment records
 ├── app/                    Next.js 15 App Router dApp (TypeScript strict)
 │   ├── src/app/
-│   │   ├── api/score/          Anthropic Sonnet 4.6 → policy clamp → EIP-712 signed Score
+│   │   ├── api/score/          DeepSeek-Chat (JSON mode) → policy clamp → EIP-712 signed Score
 │   │   ├── api/poh/attest/     EIP-191 wallet-ownership check → EIP-712 signed Attestation
 │   │   └── api/merchants/      RevenueAdapter list endpoint
 │   ├── src/lib/server/
@@ -139,6 +139,16 @@ PoHRegistry  ◀── reads ── CreditLine ──── BURNER_ROLE ──�
 │   │   ├── signer.ts           EIP-712 typed-data signing for both keys
 │   │   └── rateLimit.ts        Upstash-or-memory fixed-window limiter
 │   └── src/components/         VerifyPanel · ScorePanel · BorrowPanel · TxHistory
+├── relayer/                Settlement relayer (Fastify + viem)
+│   └── src/
+│       ├── server.ts           HTTP + queue + worker bootstrap, SETTLEMENT_ROLE pre-check
+│       ├── webhooks.ts         HMAC-verified /webhooks/sale endpoint (Shopify/Stripe-shape)
+│       ├── queue.ts            FIFO queue with dedupe, per-merchant back-pressure, backoff
+│       ├── worker.ts           Drains queue → onSaleReceived, bounded retries, dead-letter
+│       └── chain.ts            viem read/write clients + simulateContract safety
+├── scripts/
+│   ├── deploy-testnet.sh   One-command HashKey testnet deploy + role verification
+│   └── e2e-anvil.ts        End-to-end smoke test: attest → score → borrow → webhook → settle
 ├── package.json            pnpm workspace root
 └── pnpm-workspace.yaml
 ```
@@ -178,12 +188,38 @@ End-to-end onboarding (verify → score → borrow) costs ~454k gas, roughly **$
 Suite             Tests   Time
 HKDm              12      7.3 ms
 PoHRegistry       11      3.7 ms
-CreditLine        20      10.5 ms
+CreditLine        20     10.5 ms
+Integration        5     12.8 ms   (deploy + full user flow + adversarial)
 ─────────────────────────────────
-Total             43     164.5 ms     (3.83 ms per test)
+Total             48      ~170 ms
 ```
 
-Includes EIP-712 signature verification, replay-protection, expiry, role-gating, reentrancy, pause behavior, simple-interest accrual fuzz, mint/burn fuzz (256 runs).
+Includes EIP-712 signature verification, replay-protection, expiry, role-gating, reentrancy, pause behavior, simple-interest accrual fuzz, mint/burn fuzz (256 runs), and an integration suite that runs the production `Deploy` script in-memory and exercises the full attest → score → borrow → accrue → repay → re-borrow journey plus three adversarial scenarios (forged attestation, scorer-key compromise, pause behavior).
+
+### Live-chain validation
+
+The deploy script and end-to-end flow are verified against a live chain (local anvil) on every change:
+
+```
+--- forge script Deploy.s.sol against anvil (chainId 31337) ---
+HKDm         : 0x2279b7a0a67db372996a5fab50d91eaa73d2ebe6
+PoHRegistry  : 0x8a791620dd6260079bf849dc5567adc3f2fdc318
+CreditLine   : 0x610178da211fef7d417bc0e6fed39f05609ad788
+Roles verified on-chain:
+  ✓ HKDm MINTER_ROLE → CreditLine
+  ✓ HKDm BURNER_ROLE → CreditLine
+  ✓ PoH ATTESTOR_ROLE → attestor
+  ✓ Credit SCORER_ROLE → scorer
+
+--- e2e-anvil.ts (attest → score → borrow → webhook → relayer → settle) ---
+[1/4] attestation tx  status=success
+[2/4] score tx        status=success
+[3/4] borrow tx       status=success    debt after borrow: 1000 HKD
+[4/4] webhook 202 {"enqueued":true}
+       debt before webhook: 1000 HKD
+       debt after  webhook:  500 HKD
+✅ full e2e flow working
+```
 
 ### App
 
@@ -197,19 +233,21 @@ Includes EIP-712 signature verification, replay-protection, expiry, role-gating,
 | Rate limit (per IP+wallet, /score)  | 10 / minute    |
 | Rate limit (per wallet, /poh/attest)| 3 / 24h        |
 
-### Underwriting latency (Anthropic Sonnet 4.6, temperature 0, 700 max tokens)
+### Underwriting latency (DeepSeek-Chat / V3, temperature 0, 700 max tokens, JSON mode)
 
-These are estimates from the documented Sonnet 4.6 latency envelope, not yet measured against this exact prompt:
+These are estimates from the documented DeepSeek-Chat latency envelope, not yet measured against this exact prompt:
 
 | Step                                  | Estimated wall time |
 |---------------------------------------|--------------------|
 | Feature extraction (deterministic)    | < 5 ms             |
-| Anthropic API call                    | 2.5 – 4.5 s        |
+| DeepSeek API call                     | 1.0 – 3.0 s        |
 | Zod validation + policy clamp         | < 1 ms             |
 | EIP-712 sign (viem)                   | < 5 ms             |
-| **Total `/api/score`**                | **~3–5 s p50**     |
+| **Total `/api/score`**                | **~1.5–3 s p50**   |
 
-Once a measurement run is recorded against a real API key, this row will be replaced with observed p50/p95/p99.
+DeepSeek's JSON-mode (`response_format: { type: "json_object" }`) constrains the output to a valid JSON object — no fence-stripping, no parser fallback path. Cost: roughly **$0.0001 – $0.0003 per scoring call** at DeepSeek-Chat input/output pricing. Once a measurement run is recorded against a real API key, this row will be replaced with observed p50/p95/p99.
+
+The provider is wired through the official `openai` SDK pointed at DeepSeek's OpenAI-compatible base URL — swapping providers (DeepSeek → OpenAI → Together → Groq → vLLM) is a one-line `baseURL` change with no contract or downstream-route changes.
 
 ### Codebase size (handwritten only)
 
@@ -231,13 +269,13 @@ pnpm install
 cd contracts && forge install && forge build && forge test
 ```
 
-`forge test` should print **`43 passed; 0 failed`** in under a second.
+`forge test` should print **`48 passed; 0 failed`** in under a second.
 
 ### Configure environment
 
 ```bash
-cp .env.example .env.local           # for the app
-cp .env.example contracts/.env       # for forge scripts
+cp .env.example .env                 # repo root — used by deploy script + Foundry
+cp .env.example app/.env.local       # used by the Next.js app
 ```
 
 Required variables (see `.env.example` for the full list):
@@ -245,25 +283,70 @@ Required variables (see `.env.example` for the full list):
 - `DEPLOYER_PRIVATE_KEY` — funded address on the target chain
 - `ATTESTOR_PRIVATE_KEY` + `ATTESTOR_ADDRESS` — off-chain key that signs PoH attestations
 - `SCORER_PRIVATE_KEY`   + `SCORER_ADDRESS`   — off-chain key that signs Score attestations
-- `ANTHROPIC_API_KEY` — Anthropic key for the scoring service
-- `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` — for RainbowKit
+- `DEEPSEEK_API_KEY` — DeepSeek API key for the scoring service (`platform.deepseek.com`)
+- `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` — get one at `cloud.reown.com`
 - `HASHKEY_TESTNET_RPC` (defaults to public endpoint)
-- `NEXT_PUBLIC_*` contract addresses — populated automatically after deploy
 
-### Deploy contracts
+Generate signing keys with `cast wallet new` — never reuse existing keys for these roles.
+
+### Deploy contracts (one command)
 
 ```bash
-cd contracts
-forge script script/Deploy.s.sol:Deploy --rpc-url hashkey_testnet --broadcast
+./scripts/deploy-testnet.sh
 ```
 
-The deploy script wires every role correctly:
+The script:
 
-- Grants `MINTER_ROLE` + `BURNER_ROLE` on `HKDm` to `CreditLine`
-- Grants `ATTESTOR_ROLE` on `PoHRegistry` to the attestor address
-- Grants `SCORER_ROLE` + `SETTLEMENT_ROLE` on `CreditLine`
+1. Sources `.env`
+2. Verifies the RPC is reachable and the deployer has HSK gas
+3. Runs the full Foundry test suite (`forge test`)
+4. Runs `forge script Deploy.s.sol --broadcast` which wires:
+   - `MINTER_ROLE` + `BURNER_ROLE` on `HKDm` → `CreditLine`
+   - `ATTESTOR_ROLE` on `PoHRegistry` → attestor address
+   - `SCORER_ROLE` + `SETTLEMENT_ROLE` on `CreditLine` → scorer + deployer
+5. Verifies every role via `cast call hasRole(...)` on-chain before declaring success
+6. Writes addresses into `app/.env.local` and `contracts/deployments/<chainId>.json`
 
-It writes addresses to `contracts/deployments/<chainId>.json`. Copy them into `app/.env.local` as `NEXT_PUBLIC_HKDM_ADDRESS`, `NEXT_PUBLIC_POH_REGISTRY_ADDRESS`, `NEXT_PUBLIC_CREDIT_LINE_ADDRESS`.
+If you want a manual run:
+
+```bash
+cd contracts && forge script script/Deploy.s.sol:Deploy --rpc-url hashkey_testnet --broadcast
+```
+
+### Dry-run locally first
+
+Anvil can simulate the exact same deploy for free before you spend testnet gas:
+
+```bash
+anvil --chain-id 31337     # terminal 1
+# terminal 2: re-run deploy-testnet.sh pointing at http://localhost:8545
+```
+
+### Start the settlement relayer
+
+The relayer watches merchant-gateway webhooks (Shopify / Stripe) and routes sale proceeds into `CreditLine.onSaleReceived`. First grant `SETTLEMENT_ROLE` to a fresh relayer key, then boot it:
+
+```bash
+# one-time: grant SETTLEMENT_ROLE to the relayer
+cast send $CREDIT_LINE_ADDRESS "grantRole(bytes32,address)" \
+  $(cast keccak "SETTLEMENT_ROLE") $RELAYER_ADDRESS \
+  --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $HASHKEY_TESTNET_RPC
+
+# then run the relayer
+RELAYER_PRIVATE_KEY=... \
+CREDIT_LINE_ADDRESS=... \
+HKDM_ADDRESS=... \
+RPC_URL=$HASHKEY_TESTNET_RPC \
+CHAIN_ID=133 \
+WEBHOOK_SECRET=$(openssl rand -hex 32) \
+pnpm --filter @zephyrpay/relayer dev
+```
+
+On startup the relayer reads `SETTLEMENT_ROLE` from the contract and refuses to run if it doesn't hold it — you cannot boot a misconfigured relayer.
+
+Health check: `curl http://localhost:8787/health` → `{"status":"ok","queueSize":0}`
+
+Webhook endpoint: `POST /webhooks/sale` (HMAC-SHA256 signed in `x-zephyrpay-signature`).
 
 ### Run the dApp
 
@@ -288,7 +371,7 @@ The first time you connect a wallet, the UI walks you through:
 - OpenZeppelin v5.1.0 `AccessControl`, `Pausable`, `ReentrancyGuard`, `ERC20Permit`, `EIP712`, `ECDSA`, `MessageHashUtils`, `SafeERC20`
 - Per-attestor nonce bitmap on both `PoHRegistry` and `CreditLine` to block signature replay
 - `MAX_APR_BPS = 5000`, per-tier APR bands, absolute `LINE_ABSOLUTE_CAP_CENTS` = HK$50,000, max origination fee 10% — bound the blast radius of a compromised scorer key
-- Server-side env split (`serverEnv` vs `clientEnv`) keeps signing keys and Anthropic API key out of the client bundle
+- Server-side env split (`serverEnv` vs `clientEnv`) keeps signing keys and DeepSeek API key out of the client bundle
 - Zod validation at every API boundary; structured LLM output parsed and clamped before signing
 - Rate limits on both API endpoints (10/min on `/score`, 3/24h on `/poh/attest`)
 

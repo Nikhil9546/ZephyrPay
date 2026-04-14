@@ -1,7 +1,7 @@
 import "server-only";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Address, Hex } from "viem";
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env.server";
 import { clientEnv } from "@/lib/env";
 import { addresses } from "@/lib/addresses";
 

@@ -1,7 +1,7 @@
 import "server-only";
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { z } from "zod";
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env.server";
 import type { MerchantProfile } from "./revenue";
 
 /**
@@ -11,7 +11,7 @@ import type { MerchantProfile } from "./revenue";
  *   1. Feature extraction — we compute a deterministic feature vector from the
  *      merchant profile (monthly revenue trend, refund & chargeback rates,
  *      platform mix, months in business, on-chain wallet features).
- *   2. LLM rationale + categorical tier — we ask Claude Sonnet 4.6 to assign
+ *   2. LLM rationale + categorical tier — we ask DeepSeek-Chat (V3) to assign
  *      an A–E tier and an APR within policy bounds, with a short rationale.
  *      The LLM is *not* trusted with the numeric output; we clamp and validate
  *      every value with zod + business-rule guards.
@@ -21,6 +21,11 @@ import type { MerchantProfile } from "./revenue";
  *
  * This mirrors the approach of Spectral (MACRO) / RociFi (NFCS) — tier is the
  * stable primitive, premium is derived. See README for references.
+ *
+ * The provider is reachable via the official OpenAI SDK pointed at DeepSeek's
+ * OpenAI-compatible base URL — swapping providers (DeepSeek → OpenAI →
+ * Together → Groq → vLLM) is a one-line `baseURL` change with no contract or
+ * downstream-route changes.
  */
 
 type Tier = 1 | 2 | 3 | 4 | 5;
@@ -161,9 +166,12 @@ MAX LINE (HKD cents): tier-specific multiple of avgMonthlyRevenueCents:
 Be conservative. If the data is ambiguous, assign a lower tier and cite the reason.
 Never output markdown, prose, or code fences — only the JSON object.`;
 
-// -------- Anthropic call --------------------------------------------------
+// -------- LLM call (DeepSeek via OpenAI-compatible API) -------------------
 
-const anthropic = new Anthropic({ apiKey: serverEnv.ANTHROPIC_API_KEY });
+const llm = new OpenAI({
+  apiKey: serverEnv.DEEPSEEK_API_KEY,
+  baseURL: serverEnv.DEEPSEEK_BASE_URL,
+});
 
 const llmOutputSchema = z.object({
   tier: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
@@ -192,12 +200,18 @@ export async function scoreMerchant(
     onChainFeatures: req.onChainFeatures ?? null,
   };
 
-  const resp = await anthropic.messages.create({
-    model: serverEnv.ANTHROPIC_MODEL,
+  // DeepSeek's `deepseek-chat` (V3) supports OpenAI-style JSON mode.
+  // `response_format: { type: "json_object" }` constrains the output to a
+  // single valid JSON object — eliminates fence-stripping and most parser
+  // failures. DeepSeek also requires the prompt to mention "json" when JSON
+  // mode is enabled (handled in SYSTEM_PROMPT).
+  const resp = await llm.chat.completions.create({
+    model: serverEnv.DEEPSEEK_MODEL,
     max_tokens: 700,
     temperature: 0,
-    system: SYSTEM_PROMPT,
+    response_format: { type: "json_object" },
     messages: [
+      { role: "system", content: SYSTEM_PROMPT },
       {
         role: "user",
         content: `Score this merchant. Respond with JSON only.\n\n${JSON.stringify(userPayload, null, 2)}`,
@@ -205,13 +219,12 @@ export async function scoreMerchant(
     ],
   });
 
-  const text = resp.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
+  const text = resp.choices[0]?.message?.content?.trim() ?? "";
+  if (!text) {
+    throw new Error("Scorer returned empty content");
+  }
 
-  // The LLM may wrap in ```json fences despite the instruction; strip robustly.
+  // Even with JSON mode, defend against the rare ``` wrapping.
   const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
 
   let parsedJson: unknown;

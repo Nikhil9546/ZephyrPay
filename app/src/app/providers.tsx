@@ -1,36 +1,28 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { WagmiProvider } from "wagmi";
-import { RainbowKitProvider, darkTheme } from "@rainbow-me/rainbowkit";
-import { wagmiConfig } from "@/lib/wagmi";
+import dynamic from "next/dynamic";
+import type { ReactNode } from "react";
 
-import "@rainbow-me/rainbowkit/styles.css";
+/**
+ * Lazy-load the wagmi + RainbowKit + WalletConnect tree on the client only.
+ *
+ * WalletConnect's underlying core (`@walletconnect/core`) calls `indexedDB`
+ * during initialization, which throws under Node's SSR runtime. Disabling
+ * SSR for this subtree is the supported escape hatch — it has no SEO impact
+ * because the app is wallet-gated and rendered behind auth anyway.
+ */
+const ClientProviders = dynamic(
+  () => import("./providers-impl").then((m) => m.Providers),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="min-h-screen flex items-center justify-center text-muted">
+        Loading…
+      </div>
+    ),
+  },
+);
 
 export function Providers({ children }: { children: ReactNode }) {
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: { staleTime: 10_000, refetchOnWindowFocus: false, retry: 1 },
-        },
-      }),
-  );
-
-  return (
-    <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider
-          theme={darkTheme({
-            accentColor: "#10B981",
-            accentColorForeground: "#0A0A0B",
-            borderRadius: "medium",
-          })}
-        >
-          {children}
-        </RainbowKitProvider>
-      </QueryClientProvider>
-    </WagmiProvider>
-  );
+  return <ClientProviders>{children}</ClientProviders>;
 }

@@ -1,0 +1,24 @@
+{
+  "name": "@zephyrpay/relayer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Settlement relayer for ZephyrPay. Watches a webhook queue of merchant sales and routes proceeds into CreditLine.onSaleReceived.",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "fastify": "^5.2.1",
+    "viem": "^2.22.6",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
