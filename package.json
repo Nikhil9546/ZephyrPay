@@ -1,0 +1,20 @@
+{
+  "name": "zephyrpay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ZK-verified, AI-underwritten HKD-stablecoin credit lines for Asian SMEs on HashKey Chain.",
+  "license": "MIT",
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @zephyrpay/app dev",
+    "build:app": "pnpm --filter @zephyrpay/app build",
+    "build:contracts": "cd contracts && forge build",
+    "test:contracts": "cd contracts && forge test -vvv",
+    "deploy:testnet": "cd contracts && forge script script/Deploy.s.sol --rpc-url hashkey_testnet --broadcast --verify",
+    "typecheck": "pnpm --filter @zephyrpay/app typecheck",
+    "lint": "pnpm --filter @zephyrpay/app lint"
+  }
+}
