@@ -129,3 +129,56 @@ export class FixtureAdapter implements RevenueAdapter {
 export const fixtureAdapter = new FixtureAdapter();
 
 export const FIXTURE_MERCHANT_IDS = FIXTURE_MERCHANTS.map((m) => m.merchantId);
+
+// ---- Custom-form → MerchantProfile transformer ---------------------------
+
+import type { CustomBusinessForm } from "@/lib/merchant";
+
+/**
+ * Expand a single set of "typical monthly numbers" into a 3-window
+ * `MerchantProfile` that the scoring pipeline can consume. Applies MoM growth
+ * so the feature extractor sees a real trend instead of a flat line.
+ */
+export function profileFromCustomForm(
+  borrower: string,
+  form: CustomBusinessForm,
+): MerchantProfile {
+  const now = NOW();
+  const avgRevenueCents = Math.round(form.avgMonthlyRevenueHKD * 100);
+  const avgOrders = Math.max(1, Math.round(form.avgMonthlyOrders));
+  const growth = form.monthlyGrowthPercent / 100;
+
+  // Window 0 = oldest (60 days ago), window 2 = most recent.
+  // If growth > 0, most recent month is highest; if < 0, it's lowest.
+  const windows = [60, 30, 0].map((offset, idx) => {
+    // Oldest month = base, each subsequent month grows by `growth` compounded.
+    const monthsBack = 2 - idx; // 2, 1, 0
+    const factor = Math.pow(1 + growth, -monthsBack);
+    const rev = Math.max(100 * 100, Math.round(avgRevenueCents * factor));
+    const orders = Math.max(1, Math.round(avgOrders * factor));
+    const ticket = Math.max(100, Math.round(rev / orders));
+    return {
+      periodStart: now - (offset + 30) * DAY,
+      periodEnd: now - offset * DAY,
+      currency: "HKD" as const,
+      platform: form.platform,
+      grossRevenueCents: rev,
+      transactionCount: orders,
+      refundRateBps: Math.round(form.refundRatePercent * 100),
+      chargebackRateBps: Math.round(form.chargebackRatePercent * 100),
+      averageTicketCents: ticket,
+    };
+  });
+
+  const profile: MerchantProfile = {
+    merchantId: `custom_${borrower.toLowerCase().slice(2, 10)}`,
+    businessName: form.businessName,
+    countryCode: form.countryCode,
+    industry: form.industry,
+    monthsInBusiness: form.monthsInBusiness,
+    windows,
+  };
+
+  // Validate so a malformed transform fails loudly rather than silently.
+  return merchantProfileSchema.parse(profile);
+}

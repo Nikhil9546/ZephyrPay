@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
-import { Providers } from "./providers";
 import "./globals.css";
 
 const inter = Inter({
@@ -15,9 +14,9 @@ const jbm = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ZephyrPay — Sybil-resistant, AI-underwritten SME credit on HashKey Chain",
+  title: "ZephyrPay — On-chain working capital for SMEs",
   description:
-    "Verify once with a ZK proof, connect your revenue stream, and draw a HKD-stablecoin credit line underwritten by an AI oracle.",
+    "ZK-verified, AI-underwritten HKD-stablecoin credit lines on HashKey Chain. 90 seconds, not 6 weeks.",
   openGraph: {
     title: "ZephyrPay",
     description:
@@ -26,12 +25,16 @@ export const metadata: Metadata = {
   },
 };
 
+/**
+ * Root layout stays provider-free so the landing page (and any future
+ * marketing routes) can fully server-render without pulling in wagmi /
+ * RainbowKit / WalletConnect. The wallet-dependent tree is scoped to
+ * `/app/layout.tsx`.
+ */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} ${jbm.variable}`}>
-      <body>
-        <Providers>{children}</Providers>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
