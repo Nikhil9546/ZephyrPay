@@ -67,7 +67,10 @@ export async function POST(req: NextRequest) {
   }
 
   // Build the EIP-712 Score payload the CreditLine contract expects.
-  const issuedAt = BigInt(Math.floor(Date.now() / 1000));
+  // CreditLine rejects issuedAt > block.timestamp; back-date by 2 minutes so
+  // a fast server never races ahead of HashKey Chain's block clock.
+  const ISSUED_CLOCK_SKEW_SECONDS = 120n;
+  const issuedAt = BigInt(Math.floor(Date.now() / 1000)) - ISSUED_CLOCK_SKEW_SECONDS;
   const expiresAt = issuedAt + BigInt(SCORE_VALIDITY_SECONDS);
   const nonce = ("0x" + randomBytes(32).toString("hex")) as Hex;
   // Convert HKD cents → HKDm base units (HKDm has 6 decimals; 1 HKD = 1e6 units)

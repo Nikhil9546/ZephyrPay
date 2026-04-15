@@ -54,9 +54,14 @@ const env = Object.fromEntries(required.map((k) => [k, process.env[k]!])) as Rec
   string
 >;
 
+// Chain id from env (fallback to anvil) — the EIP-712 domain separator
+// includes this; a mismatch recovers to a random address and trips
+// `AttestorNotAuthorized`.
+const CHAIN_ID = Number(process.env.CHAIN_ID ?? "31337");
+
 const chain = {
-  id: 31337,
-  name: "anvil",
+  id: CHAIN_ID,
+  name: `chain-${CHAIN_ID}`,
   nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
   rpcUrls: { default: { http: [env.RPC_URL] } },
 } as const;
@@ -83,13 +88,13 @@ const creditAbi = parseAbi([
 const pohDomain = {
   name: "ZephyrPay PoHRegistry",
   version: "1",
-  chainId: 31337,
+  chainId: CHAIN_ID,
   verifyingContract: env.POH as Address,
 } as const;
 const creditDomain = {
   name: "ZephyrPay CreditLine",
   version: "1",
-  chainId: 31337,
+  chainId: CHAIN_ID,
   verifyingContract: env.CREDIT as Address,
 } as const;
 
@@ -115,7 +120,9 @@ const scoreTypes = {
 } as const;
 
 async function main() {
-  const now = BigInt(Math.floor(Date.now() / 1000));
+  // Back-date by 2 minutes to absorb wall-clock vs block-timestamp skew on
+  // slow/low-activity testnets (HashKey testnet block time is ~2s).
+  const now = BigInt(Math.floor(Date.now() / 1000)) - 120n;
   const poh = env.POH as Address;
   const credit = env.CREDIT as Address;
 

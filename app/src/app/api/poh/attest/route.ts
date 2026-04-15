@@ -108,7 +108,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "proof bundle missing" }, { status: 400 });
   }
 
-  const issuedAt = BigInt(Math.floor(Date.now() / 1000));
+  // The on-chain PoHRegistry rejects issuedAt > block.timestamp. HashKey Chain
+  // (and most L2s) produce blocks slightly behind wall-clock — up to tens of
+  // seconds on low-activity testnets. Back-date issuedAt by 2 minutes so an
+  // attestation signed on a fast server never races ahead of chain time.
+  const ISSUED_CLOCK_SKEW_SECONDS = 120n;
+  const issuedAt = BigInt(Math.floor(Date.now() / 1000)) - ISSUED_CLOCK_SKEW_SECONDS;
   const expiresAt = issuedAt + BigInt(ATTESTATION_VALIDITY_SECONDS);
   const nonce = ("0x" + randomBytes(32).toString("hex")) as Hex;
 

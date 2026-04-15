@@ -1,0 +1,13 @@
+{
+  "chainId": 133,
+  "deployedAt": 1776235258,
+  "admin": "0x27dcb220B9ceB3dF3AE4bf52bD1D20008969f232",
+  "attestor": "0xd3433E3E78EEf123AD280a5d7b29b6A13c4014b3",
+  "scorer": "0xAF32e88F8a80645aCb9Bacd8551168d474Cd9815",
+  "treasury": "0x27dcb220B9ceB3dF3AE4bf52bD1D20008969f232",
+  "contracts": {
+    "HKDm": "0x50a1C8455C48C78Ab19c718FC31e5A5b54584cdB",
+    "PoHRegistry": "0x41FAD1d83b6489B6A9a973A3c249D0E57af333f0",
+    "CreditLine": "0xb8d92F355e7BD02Cf9811C48cea3457dCD7Ca72B"
+  }
+}
