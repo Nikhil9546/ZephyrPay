@@ -567,9 +567,6 @@ function Step({
       </div>
       <h3 className="mt-2 font-semibold text-lg">{title}</h3>
       <p className="mt-2 text-sm text-muted leading-relaxed">{body}</p>
-      <div className="mt-4 text-xs font-mono text-ink/70 pt-3">
-        {artifact}
-      </div>
     </li>
   );
 }
