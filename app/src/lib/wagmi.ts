@@ -15,4 +15,10 @@ export const wagmiConfig = getDefaultConfig({
     [hashkeyMainnet.id]: http(),
   },
   ssr: true,
+  // Disable wagmi's EIP-6963 auto-discovery of injected wallets. RainbowKit
+  // already curates a deduped connector list; without this flag, wallets that
+  // announce themselves via EIP-6963 (notably Phantom, which also pretends to
+  // be MetaMask) get registered twice with the same `app.phantom` key, and
+  // React complains about duplicate children keys. One curated list, no dupes.
+  multiInjectedProviderDiscovery: false,
 });

@@ -132,14 +132,9 @@ export function ScorePanel({ fullyVerified, hasScore, onScored }: Props) {
     <div className="card space-y-5">
       <div>
         <div className="text-sm font-medium text-muted">Step 2</div>
-        <h2 className="text-xl font-semibold">
-          Score a business — demo merchant or your own
-        </h2>
+        <h2 className="text-xl font-semibold">Get scored</h2>
         <p className="mt-1 text-sm text-muted max-w-2xl">
-          We extract features from the business, ask DeepSeek for a tier within our
-          policy bands, clamp APR and max-line to hard limits, then sign an
-          EIP-712 score attestation that you commit to the{" "}
-          <code>CreditLine</code> contract.
+          Pick a demo merchant or enter your own business. AI gives you a credit tier in a few seconds.
         </p>
       </div>
 
@@ -194,7 +189,7 @@ export function ScorePanel({ fullyVerified, hasScore, onScored }: Props) {
       {/* Shared status + result ------------------------------------------- */}
 
       {status.kind === "scoring" && (
-        <div className="text-sm text-muted">Scoring {status.label}… (≈1-3s with DeepSeek)</div>
+        <div className="text-sm text-muted">Scoring {status.label}…</div>
       )}
       {status.kind === "submitting" && (
         <div className="text-sm text-muted">Submitting signed score on-chain…</div>

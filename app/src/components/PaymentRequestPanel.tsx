@@ -119,17 +119,12 @@ export function PaymentRequestPanel({ borrower, outstandingDebt, onRepaid }: Pro
         <div className="flex items-center gap-2">
           <div className="text-sm font-medium text-muted">Step 4</div>
           <span className="text-[11px] uppercase tracking-wider bg-accent/10 text-accent px-1.5 py-0.5 rounded">
-            HashKey HP2
+            HashKey Payment
           </span>
         </div>
-        <h2 className="text-xl font-semibold">
-          Accept a customer payment via HashKey Payment
-        </h2>
+        <h2 className="text-xl font-semibold">Accept a customer payment</h2>
         <p className="mt-1 text-sm text-muted max-w-2xl">
-          Generate a HashKey HP2 (Payment Protocol v2) checkout link. Customers
-          pay in USDC on HashKey Chain testnet. When payment confirms, the
-          proceeds are auto-routed into <code>CreditLine.onSaleReceived()</code>
-          &nbsp;— paying down your outstanding loan without any manual step.
+          Share a link. Customers pay in stablecoin. Your loan repays itself.
         </p>
       </div>
 

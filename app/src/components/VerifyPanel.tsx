@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useAccount, useSignMessage, useWalletClient, usePublicClient } from "wagmi";
+import { useAccount, useWalletClient, usePublicClient } from "wagmi";
 import type { Address, Hex } from "viem";
+import { toast } from "sonner";
 import { addresses } from "@/lib/addresses";
 import { pohAbi } from "@/lib/abi";
-import { toast } from "sonner";
+import { loadOrCreateIdentity, enrollIdentity, buildProof } from "@/lib/zk-client";
 
 interface Props {
   fullyVerified: boolean;
@@ -14,29 +15,40 @@ interface Props {
 
 type Status =
   | { kind: "idle" }
-  | { kind: "signing" }
+  | { kind: "preparing" }
+  | { kind: "proving" }
   | { kind: "attesting" }
   | { kind: "submitting" }
   | { kind: "confirming"; hash: Hex }
-  | { kind: "done"; hash: Hex }
-  | { kind: "error"; message: string };
+  | { kind: "done"; hash: Hex };
 
 export function VerifyPanel({ fullyVerified, onDone }: Props) {
   const { address } = useAccount();
-  const { signMessageAsync } = useSignMessage();
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
   const [status, setStatus] = useState<Status>({ kind: "idle" });
 
   async function runVerify() {
     if (!address || !walletClient || !publicClient) return;
-    setStatus({ kind: "signing" });
     try {
+      // 1. Load or create a persistent ZK identity for this browser.
+      setStatus({ kind: "preparing" });
+      const identity = loadOrCreateIdentity();
+      await enrollIdentity(identity);
+
+      // 2. Generate a real Groth16 zk-SNARK proof of group membership, scoped
+      //    to this wallet and a fresh challenge.
+      setStatus({ kind: "proving" });
       const kind = 3 as const; // humanity + business bundle
       const clientNonce = crypto.randomUUID();
-      const message = `ZephyrPay PoH ${address.toLowerCase()} ${kind} ${clientNonce}`;
-      const ownerSignature = await signMessageAsync({ message });
+      const zkProof = await buildProof({
+        identity,
+        subject: address,
+        kind,
+        clientNonce,
+      });
 
+      // 3. Submit proof to the attestor. Server runs real Groth16 verification.
       setStatus({ kind: "attesting" });
       const attestRes = await fetch("/api/poh/attest", {
         method: "POST",
@@ -44,21 +56,13 @@ export function VerifyPanel({ fullyVerified, onDone }: Props) {
         body: JSON.stringify({
           subject: address,
           kind,
-          /**
-           * In production this `proofBundle` will be the ZK proof returned by
-           * Self.xyz / Humanity Protocol after the user completes their flow.
-           * The attestation API verifies it before signing. For this demo, we
-           * send an opaque bundle; the backend gates on rate-limit + wallet
-           * ownership signature (verified above).
-           */
-          proofBundle: `zephyrpay-demo-bundle-${clientNonce}`,
-          ownerSignature,
+          zkProof,
           clientNonce,
         }),
       });
       if (!attestRes.ok) {
         const body = await attestRes.json().catch(() => ({}));
-        throw new Error(body.error ?? `attestation failed (${attestRes.status})`);
+        throw new Error(body.detail ?? body.error ?? `attestation failed (${attestRes.status})`);
       }
       const { attestation } = (await attestRes.json()) as {
         attestation: {
@@ -71,6 +75,7 @@ export function VerifyPanel({ fullyVerified, onDone }: Props) {
         };
       };
 
+      // 4. Record the signed attestation on-chain.
       setStatus({ kind: "submitting" });
       const hash = await walletClient.writeContract({
         address: addresses.poh,
@@ -92,12 +97,11 @@ export function VerifyPanel({ fullyVerified, onDone }: Props) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : "unknown error";
       if (msg.includes("User rejected") || msg.includes("User denied")) {
-        toast.info("User cancelled the request");
-        setStatus({ kind: "idle" });
+        toast.info("Cancelled");
       } else {
-        toast.error("Verification failed. Please try again.");
-        setStatus({ kind: "idle" });
+        toast.error(`Verification failed: ${msg}`);
       }
+      setStatus({ kind: "idle" });
     }
   }
 
@@ -110,9 +114,7 @@ export function VerifyPanel({ fullyVerified, onDone }: Props) {
           </div>
           <div>
             <div className="font-semibold">Verified</div>
-            <div className="text-sm text-muted">
-              Humanity and business attestations recorded on-chain.
-            </div>
+            <div className="text-sm text-muted">You&apos;re good to go.</div>
           </div>
         </div>
       </div>
@@ -120,7 +122,8 @@ export function VerifyPanel({ fullyVerified, onDone }: Props) {
   }
 
   const isBusy =
-    status.kind === "signing" ||
+    status.kind === "preparing" ||
+    status.kind === "proving" ||
     status.kind === "attesting" ||
     status.kind === "submitting" ||
     status.kind === "confirming";
@@ -129,31 +132,22 @@ export function VerifyPanel({ fullyVerified, onDone }: Props) {
     <div className="card space-y-4">
       <div>
         <div className="text-sm font-medium text-muted">Step 1</div>
-        <h2 className="text-xl font-semibold">Verify once with ZK + business attestation</h2>
+        <h2 className="text-xl font-semibold">Verify you&apos;re real</h2>
         <p className="mt-1 text-sm text-muted max-w-2xl">
-          One click signs a wallet-ownership challenge. Our attestor then issues an EIP-712
-          signed humanity+business attestation that you submit to the <code>PoHRegistry</code>
-          contract. In production this is backed by Self.xyz / Humanity Protocol ZK proofs.
+          Generate a zero-knowledge proof of humanity and business. One click,
+          one on-chain record.
         </p>
       </div>
 
-      <button
-        onClick={runVerify}
-        disabled={isBusy || !address}
-        className="btn-accent"
-      >
-        {status.kind === "signing" && "Waiting for wallet signature…"}
-        {status.kind === "attesting" && "Issuing attestation…"}
-        {status.kind === "submitting" && "Submitting on-chain…"}
-        {status.kind === "confirming" && "Confirming…"}
-        {status.kind === "idle" && "Verify humanity + business"}
-        {status.kind === "error" && "Retry verification"}
+      <button onClick={runVerify} disabled={isBusy || !address} className="btn-accent">
+        {status.kind === "preparing" && "Preparing identity…"}
+        {status.kind === "proving" && "Generating ZK proof…"}
+        {status.kind === "attesting" && "Verifying proof…"}
+        {status.kind === "submitting" && "Waiting for wallet…"}
+        {status.kind === "confirming" && "Confirming on-chain…"}
+        {status.kind === "idle" && "Verify"}
         {status.kind === "done" && "Verified ✓"}
       </button>
-
-      {status.kind === "confirming" && (
-        <div className="text-xs font-mono text-muted">tx: {status.hash}</div>
-      )}
     </div>
   );
 }

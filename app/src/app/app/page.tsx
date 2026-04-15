@@ -21,22 +21,16 @@ export default function Home() {
       <main className="mx-auto max-w-6xl px-6 py-10 space-y-8">
         <section>
           <h1 className="text-4xl font-bold tracking-tight">
-            HKD-stablecoin credit for SMEs, underwritten by AI.
+            Working capital for your business.
           </h1>
           <p className="mt-3 max-w-3xl text-lg text-muted">
-            Verify once with a ZK-backed humanity + business attestation. Connect your revenue
-            stream. Get an AI-scored credit line in HKDm, a regulated-stablecoin stand-in built
-            for HashKey Chain and designed to swap into HKDAP at launch.
+            Verify. Get scored by AI. Borrow. Accept payments that auto-repay.
           </p>
         </section>
 
         {!isConnected ? (
           <div className="card">
-            <p className="text-sm text-muted">
-              Connect a wallet on HashKey Chain to begin. You&apos;ll sign a one-time
-              wallet-ownership challenge, then a single on-chain transaction records your
-              attestation.
-            </p>
+            <p className="text-sm text-muted">Connect a wallet to begin.</p>
           </div>
         ) : (
           <>
