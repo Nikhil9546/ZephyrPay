@@ -6,7 +6,7 @@
   "license": "MIT",
   "packageManager": "pnpm@9.15.4",
   "engines": {
-    "node": ">=20.0.0"
+    "node": "20.x"
   },
   "scripts": {
     "dev": "pnpm --filter @zephyrpay/app dev",
