@@ -5,6 +5,7 @@ import { useAccount, useSignMessage, useWalletClient, usePublicClient } from "wa
 import type { Address, Hex } from "viem";
 import { addresses } from "@/lib/addresses";
 import { pohAbi } from "@/lib/abi";
+import { toast } from "sonner";
 
 interface Props {
   fullyVerified: boolean;
@@ -89,10 +90,14 @@ export function VerifyPanel({ fullyVerified, onDone }: Props) {
       setStatus({ kind: "done", hash });
       onDone();
     } catch (e) {
-      setStatus({
-        kind: "error",
-        message: e instanceof Error ? e.message : "unknown error",
-      });
+      const msg = e instanceof Error ? e.message : "unknown error";
+      if (msg.includes("User rejected") || msg.includes("User denied")) {
+        toast.info("User cancelled the request");
+        setStatus({ kind: "idle" });
+      } else {
+        toast.error("Verification failed. Please try again.");
+        setStatus({ kind: "idle" });
+      }
     }
   }
 
@@ -146,9 +151,6 @@ export function VerifyPanel({ fullyVerified, onDone }: Props) {
         {status.kind === "done" && "Verified ✓"}
       </button>
 
-      {status.kind === "error" && (
-        <div className="text-sm text-danger">Failed: {status.message}</div>
-      )}
       {status.kind === "confirming" && (
         <div className="text-xs font-mono text-muted">tx: {status.hash}</div>
       )}

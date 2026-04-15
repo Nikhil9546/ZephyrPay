@@ -8,6 +8,7 @@ import { addresses } from "@/lib/addresses";
 import { creditLineAbi } from "@/lib/abi";
 import type { MerchantProfile } from "@/lib/server/revenue";
 import { formatAprBps, formatHkdCents } from "@/lib/format";
+import { toast } from "sonner";
 
 interface Props {
   fullyVerified: boolean;
@@ -107,7 +108,14 @@ export function ScorePanel({ fullyVerified, hasScore, onScored }: Props) {
       setStatus({ kind: "done", hash });
       onScored();
     } catch (e) {
-      setStatus({ kind: "error", message: e instanceof Error ? e.message : "unknown" });
+      const msg = e instanceof Error ? e.message : "unknown";
+      if (msg.includes("User rejected") || msg.includes("User denied")) {
+        toast.info("User cancelled the request");
+        setStatus({ kind: "idle" });
+      } else {
+        toast.error("Transaction failed. Please try again.");
+        setStatus({ kind: "idle" });
+      }
     }
   }
 
@@ -158,10 +166,6 @@ export function ScorePanel({ fullyVerified, hasScore, onScored }: Props) {
       {status.kind === "confirming" && (
         <div className="text-xs font-mono text-muted">tx: {status.hash}</div>
       )}
-      {status.kind === "error" && (
-        <div className="text-sm text-danger">Failed: {status.message}</div>
-      )}
-
       {result && hasScore && (status.kind === "done" || status.kind === "idle") && (
         <div className="rounded-lg border border-border bg-paper p-4">
           <div className="flex items-center gap-6">

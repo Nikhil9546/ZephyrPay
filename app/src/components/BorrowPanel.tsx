@@ -7,6 +7,7 @@ import { formatUnits, maxUint256, parseUnits } from "viem";
 import { addresses } from "@/lib/addresses";
 import { creditLineAbi, hkdmAbi } from "@/lib/abi";
 import { formatAprBps, formatHkdm } from "@/lib/format";
+import { toast } from "sonner";
 
 const HKDM_DECIMALS = 6;
 
@@ -77,7 +78,13 @@ export function BorrowPanel({
       setAmountStr("");
       onChanged();
     } catch (e) {
-      setStatus({ kind: "error", message: e instanceof Error ? e.message : "unknown" });
+      const msg = e instanceof Error ? e.message : "unknown";
+      if (msg.includes("User rejected") || msg.includes("User denied")) {
+        toast.info("User cancelled the request");
+      } else {
+        toast.error("Borrow failed. Please try again.");
+      }
+      setStatus({ kind: "idle" });
     }
   }
 
@@ -96,7 +103,13 @@ export function BorrowPanel({
       setStatus({ kind: "done", hash, label: "Approve" });
       onChanged();
     } catch (e) {
-      setStatus({ kind: "error", message: e instanceof Error ? e.message : "unknown" });
+      const msg = e instanceof Error ? e.message : "unknown";
+      if (msg.includes("User rejected") || msg.includes("User denied")) {
+        toast.info("User cancelled the request");
+      } else {
+        toast.error("Approval failed. Please try again.");
+      }
+      setStatus({ kind: "idle" });
     }
   }
 
@@ -116,7 +129,13 @@ export function BorrowPanel({
       setAmountStr("");
       onChanged();
     } catch (e) {
-      setStatus({ kind: "error", message: e instanceof Error ? e.message : "unknown" });
+      const msg = e instanceof Error ? e.message : "unknown";
+      if (msg.includes("User rejected") || msg.includes("User denied")) {
+        toast.info("User cancelled the request");
+      } else {
+        toast.error("Repay failed. Please try again.");
+      }
+      setStatus({ kind: "idle" });
     }
   }
 
@@ -201,9 +220,6 @@ export function BorrowPanel({
         <div className="text-xs font-mono text-muted">
           confirming tx: {status.hash.slice(0, 10)}…{status.hash.slice(-8)}
         </div>
-      )}
-      {status.kind === "error" && (
-        <div className="text-sm text-danger">Failed: {status.message}</div>
       )}
     </div>
   );
