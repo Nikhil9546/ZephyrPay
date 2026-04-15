@@ -172,10 +172,10 @@ function HowItWorks() {
           How it works
         </div>
         <h2 className="mt-2 text-3xl font-bold leading-tight">
-          Four steps. Roughly ninety seconds.
+          Five steps. Roughly ninety seconds.
         </h2>
       </div>
-      <ol className="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+      <ol className="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-5">
         <Step
           n={1}
           title="Verify once"
@@ -196,9 +196,15 @@ function HowItWorks() {
         />
         <Step
           n={4}
-          title="Draw & auto-repay"
-          body="Borrow HKDm against your line. A settlement relayer watches your sales webhook and routes proceeds into on-chain repayment automatically."
-          artifact="CreditLine.borrow() + onSaleReceived()"
+          title="Draw your line"
+          body="Borrow HKDm against your approved line. Mint in seconds, 1.5% origination fee, simple-interest accrual, no bank paperwork."
+          artifact="CreditLine.borrow()"
+        />
+        <Step
+          n={5}
+          title="Accept HP2 payments"
+          body="Generate a HashKey HP2 checkout link. Customers pay in USDC; when payment confirms, a signed webhook auto-settles the proceeds on-chain — no manual step."
+          artifact="HP2 cart-mandate → webhook → onSaleReceived()"
         />
       </ol>
     </section>

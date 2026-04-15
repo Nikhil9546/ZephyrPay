@@ -5,6 +5,7 @@ import { Navbar } from "@/components/Navbar";
 import { VerifyPanel } from "@/components/VerifyPanel";
 import { ScorePanel } from "@/components/ScorePanel";
 import { BorrowPanel } from "@/components/BorrowPanel";
+import { PaymentRequestPanel } from "@/components/PaymentRequestPanel";
 import { TxHistory } from "@/components/TxHistory";
 import { useAccountStatus } from "@/hooks/useZephyrPay";
 import { formatHkdm, formatAprBps } from "@/lib/format";
@@ -56,6 +57,14 @@ export default function Home() {
                 hkdmBalance={status.hkdmBalance}
                 allowance={status.allowanceToCreditLine}
                 onChanged={status.refetch}
+              />
+            )}
+
+            {status.score && (
+              <PaymentRequestPanel
+                borrower={address}
+                outstandingDebt={status.outstandingDebt}
+                onRepaid={status.refetch}
               />
             )}
 
