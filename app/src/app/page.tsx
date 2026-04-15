@@ -179,7 +179,7 @@ function HowItWorks() {
         <Step
           n={1}
           title="Verify once"
-          body="Sign a wallet-ownership challenge. A ZK-backed attestor records a humanity + business proof on the PoHRegistry contract. Valid for 180 days."
+          body="Sign a wallet ownership challenge. A ZK backed attestor records a humanity + business proof on the PoHRegistry contract. Valid for 180 days."
           artifact="PoHRegistry.recordAttestation()"
         />
         <Step
@@ -191,13 +191,13 @@ function HowItWorks() {
         <Step
           n={3}
           title="Get scored by AI"
-          body="DeepSeek assigns a tier (A–E) with a plain-English rationale. APR and max line are clamped to policy bands — the LLM can't invent risk-free 50% lines."
+          body="DeepSeek assigns a tier (A–E) with a plain English rationale. APR and max line are clamped to policy bands — the LLM can't invent risk free 50% lines."
           artifact="CreditLine.applyScore() with EIP-712 signed attestation"
         />
         <Step
           n={4}
-          title="Draw & auto-repay"
-          body="Borrow HKDm against your line. A settlement relayer watches your sales webhook and routes proceeds into on-chain repayment automatically."
+          title="Draw & autorepay"
+          body="Borrow HKDm against your line. A settlement relayer watches your sales webhook and routes proceeds into on chain repayment automatically."
           artifact="CreditLine.borrow() + onSaleReceived()"
         />
       </ol>
@@ -561,7 +561,7 @@ function Step({
       </div>
       <h3 className="mt-2 font-semibold text-lg">{title}</h3>
       <p className="mt-2 text-sm text-muted leading-relaxed">{body}</p>
-      <div className="mt-4 text-xs font-mono text-ink/70 border-t border-border pt-3">
+      <div className="mt-4 text-xs font-mono text-ink/70 pt-3">
         {artifact}
       </div>
     </li>
