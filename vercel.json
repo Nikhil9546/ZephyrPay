@@ -3,6 +3,6 @@
   "framework": "nextjs",
   "installCommand": "npm install --legacy-peer-deps",
   "buildCommand": "npm run build -w @zephyrpay/app",
-  "outputDirectory": "app/.next",
+  "outputDirectory": ".next",
   "cleanUrls": true
 }
