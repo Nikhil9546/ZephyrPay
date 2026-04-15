@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { serverEnv } from "@/lib/env.server";
 import type { MerchantProfile } from "./revenue";
+import { customBusinessFormSchema } from "@/lib/merchant";
 
 /**
  * AI credit-scoring engine.
@@ -43,18 +44,37 @@ const GLOBAL_APR_CEILING_BPS = 5_000; // matches CreditLine.MAX_APR_BPS
 const LINE_ABSOLUTE_CAP_CENTS = 50_000 * 100; // HK$50,000 hard ceiling per borrower
 const LINE_FLOOR_CENTS = 0;
 
-export const scoringRequestSchema = z.object({
-  borrower: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-  merchantProfileRef: z.string().min(1),
-  onChainFeatures: z
-    .object({
-      walletAgeDays: z.number().int().nonnegative(),
-      txCount90d: z.number().int().nonnegative(),
-      uniqueCounterparties90d: z.number().int().nonnegative(),
-      stablecoinInflow90dCents: z.number().int().nonnegative(),
-    })
-    .optional(),
-});
+const onChainFeaturesSchema = z
+  .object({
+    walletAgeDays: z.number().int().nonnegative(),
+    txCount90d: z.number().int().nonnegative(),
+    uniqueCounterparties90d: z.number().int().nonnegative(),
+    stablecoinInflow90dCents: z.number().int().nonnegative(),
+  })
+  .optional();
+
+/**
+ * The scoring API accepts two profile sources, discriminated by `source`:
+ *   - "fixture" : a reference to a seeded merchant (demo flow)
+ *   - "custom"  : an inline form submitted by the user
+ *
+ * Both paths converge on the same scoring pipeline — only the profile-
+ * construction step differs.
+ */
+export const scoringRequestSchema = z.discriminatedUnion("source", [
+  z.object({
+    source: z.literal("fixture"),
+    borrower: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+    merchantProfileRef: z.string().min(1),
+    onChainFeatures: onChainFeaturesSchema,
+  }),
+  z.object({
+    source: z.literal("custom"),
+    borrower: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+    customForm: customBusinessFormSchema,
+    onChainFeatures: onChainFeaturesSchema,
+  }),
+]);
 export type ScoringRequest = z.infer<typeof scoringRequestSchema>;
 
 export const scoringResultSchema = z.object({
@@ -83,9 +103,11 @@ interface Features {
   onChainScore: number;
 }
 
+type OnChainFeatures = z.infer<typeof onChainFeaturesSchema>;
+
 function extractFeatures(
   profile: MerchantProfile,
-  onChain: ScoringRequest["onChainFeatures"],
+  onChain: OnChainFeatures,
 ): Features {
   const windows = [...profile.windows].sort((a, b) => a.periodStart - b.periodStart);
   const revs = windows.map((w) => w.grossRevenueCents);
@@ -183,12 +205,13 @@ const llmOutputSchema = z.object({
 
 export async function scoreMerchant(
   profile: MerchantProfile,
-  req: ScoringRequest,
+  borrower: string,
+  onChain: OnChainFeatures,
 ): Promise<ScoringResult> {
-  const features = extractFeatures(profile, req.onChainFeatures);
+  const features = extractFeatures(profile, onChain);
 
   const userPayload = {
-    borrower: req.borrower,
+    borrower,
     profile: {
       businessName: profile.businessName,
       country: profile.countryCode,
@@ -197,7 +220,7 @@ export async function scoreMerchant(
       platformMix: Array.from(new Set(profile.windows.map((w) => w.platform))),
     },
     extractedFeatures: features,
-    onChainFeatures: req.onChainFeatures ?? null,
+    onChainFeatures: onChain ?? null,
   };
 
   // DeepSeek's `deepseek-chat` (V3) supports OpenAI-style JSON mode.

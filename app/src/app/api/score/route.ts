@@ -3,14 +3,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import type { Address, Hex } from "viem";
 import { scoreMerchant, scoringRequestSchema } from "@/lib/server/scoring";
-import { fixtureAdapter } from "@/lib/server/revenue";
+import { fixtureAdapter, profileFromCustomForm } from "@/lib/server/revenue";
+import type { MerchantProfile } from "@/lib/server/revenue";
 import { signScore, scorer } from "@/lib/server/signer";
 import { rateLimit } from "@/lib/server/rateLimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SCORE_VALIDITY_SECONDS = 15 * 60; // scorer attestation valid for 15 minutes
+const SCORE_VALIDITY_SECONDS = 15 * 60;
 
 function clientKey(req: NextRequest, borrower: string): string {
   const ip =
@@ -48,19 +49,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let profile;
+  // Resolve the profile from whichever source the caller chose.
+  let profile: MerchantProfile;
   try {
-    profile = await fixtureAdapter.fetchProfile(parsed.data.merchantProfileRef);
+    if (parsed.data.source === "fixture") {
+      profile = await fixtureAdapter.fetchProfile(parsed.data.merchantProfileRef);
+    } else {
+      profile = profileFromCustomForm(parsed.data.borrower, parsed.data.customForm);
+    }
   } catch (e) {
     return NextResponse.json(
-      { error: "merchant profile not found", detail: (e as Error).message },
-      { status: 404 },
+      { error: "profile resolution failed", detail: (e as Error).message },
+      { status: 400 },
     );
   }
 
   let result;
   try {
-    result = await scoreMerchant(profile, parsed.data);
+    result = await scoreMerchant(profile, parsed.data.borrower, parsed.data.onChainFeatures);
   } catch (e) {
     const message = e instanceof Error ? e.message : "unknown scoring error";
     return NextResponse.json({ error: "scoring failed", detail: message }, { status: 502 });
@@ -73,8 +79,7 @@ export async function POST(req: NextRequest) {
   const issuedAt = BigInt(Math.floor(Date.now() / 1000)) - ISSUED_CLOCK_SKEW_SECONDS;
   const expiresAt = issuedAt + BigInt(SCORE_VALIDITY_SECONDS);
   const nonce = ("0x" + randomBytes(32).toString("hex")) as Hex;
-  // Convert HKD cents → HKDm base units (HKDm has 6 decimals; 1 HKD = 1e6 units)
-  const maxLine = BigInt(result.maxLineCents) * 10_000n; // cents * 1e4 = HKD * 1e6
+  const maxLine = BigInt(result.maxLineCents) * 10_000n; // cents → HKDm 6-dp units
   const signature = await signScore({
     borrower: parsed.data.borrower as Address,
     tier: result.tier,
@@ -86,6 +91,13 @@ export async function POST(req: NextRequest) {
   });
 
   return NextResponse.json({
+    source: parsed.data.source,
+    profile: {
+      businessName: profile.businessName,
+      industry: profile.industry,
+      monthsInBusiness: profile.monthsInBusiness,
+      platform: profile.windows[0]?.platform,
+    },
     score: {
       tier: result.tier,
       tierLabel: result.tierLabel,

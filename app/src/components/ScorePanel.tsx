@@ -9,6 +9,7 @@ import { creditLineAbi } from "@/lib/abi";
 import type { MerchantProfile } from "@/lib/server/revenue";
 import { formatAprBps, formatHkdCents } from "@/lib/format";
 import { toast } from "sonner";
+import { CustomBusinessForm, type ScorePayload } from "./CustomBusinessForm";
 
 interface Props {
   fullyVerified: boolean;
@@ -18,11 +19,21 @@ interface Props {
 
 type Status =
   | { kind: "idle" }
-  | { kind: "scoring"; merchantId: string }
+  | { kind: "scoring"; label: string }
   | { kind: "submitting" }
   | { kind: "confirming"; hash: Hex }
   | { kind: "done"; hash: Hex }
   | { kind: "error"; message: string };
+
+type Mode = "demo" | "custom";
+
+interface ScoreResult {
+  tier: number;
+  tierLabel: string;
+  aprBps: number;
+  maxLineCents: number;
+  rationale: string;
+}
 
 export function ScorePanel({ fullyVerified, hasScore, onScored }: Props) {
   const { address } = useAccount();
@@ -30,14 +41,9 @@ export function ScorePanel({ fullyVerified, hasScore, onScored }: Props) {
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
 
+  const [mode, setMode] = useState<Mode>("demo");
   const [selected, setSelected] = useState<string | null>(null);
-  const [result, setResult] = useState<null | {
-    tier: number;
-    tierLabel: string;
-    aprBps: number;
-    maxLineCents: number;
-    rationale: string;
-  }>(null);
+  const [result, setResult] = useState<ScoreResult | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
 
   if (!fullyVerified) {
@@ -48,45 +54,16 @@ export function ScorePanel({ fullyVerified, hasScore, onScored }: Props) {
     );
   }
 
-  async function scoreAndApply(merchant: MerchantProfile) {
+  /**
+   * Shared on-chain submission path. Both the demo-merchant scorer and the
+   * custom-form scorer converge here: the server has already produced an
+   * EIP-712 signed Score attestation; this function commits it to the
+   * CreditLine contract.
+   */
+  async function submitScoreAttestation(payload: ScorePayload, label: string) {
     if (!address || !walletClient || !publicClient) return;
-    setSelected(merchant.merchantId);
-    setStatus({ kind: "scoring", merchantId: merchant.merchantId });
-    setResult(null);
+    setResult(payload.score);
     try {
-      const res = await fetch("/api/score", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          borrower: address,
-          merchantProfileRef: merchant.merchantId,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? `score failed (${res.status})`);
-      }
-      const payload = (await res.json()) as {
-        score: {
-          tier: number;
-          tierLabel: string;
-          aprBps: number;
-          maxLineCents: number;
-          rationale: string;
-        };
-        attestation: {
-          borrower: Hex;
-          tier: number;
-          maxLine: string;
-          aprBps: number;
-          issuedAt: string;
-          expiresAt: string;
-          nonce: Hex;
-          signature: Hex;
-        };
-      };
-      setResult(payload.score);
-
       setStatus({ kind: "submitting" });
       const hash = await walletClient.writeContract({
         address: addresses.creditLine,
@@ -107,6 +84,7 @@ export function ScorePanel({ fullyVerified, hasScore, onScored }: Props) {
       await publicClient.waitForTransactionReceipt({ hash });
       setStatus({ kind: "done", hash });
       onScored();
+      void label;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "unknown";
       if (msg.includes("User rejected") || msg.includes("User denied")) {
@@ -119,46 +97,104 @@ export function ScorePanel({ fullyVerified, hasScore, onScored }: Props) {
     }
   }
 
+  async function scoreDemoMerchant(merchant: MerchantProfile) {
+    if (!address) return;
+    setSelected(merchant.merchantId);
+    setStatus({ kind: "scoring", label: merchant.businessName });
+    setResult(null);
+    try {
+      const res = await fetch("/api/score", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "fixture",
+          borrower: address,
+          merchantProfileRef: merchant.merchantId,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `score failed (${res.status})`);
+      }
+      const payload = (await res.json()) as ScorePayload;
+      await submitScoreAttestation(payload, merchant.businessName);
+    } catch (e) {
+      setStatus({ kind: "error", message: e instanceof Error ? e.message : "unknown" });
+    }
+  }
+
+  const busy =
+    status.kind === "scoring" ||
+    status.kind === "submitting" ||
+    status.kind === "confirming";
+
   return (
-    <div className="card space-y-4">
+    <div className="card space-y-5">
       <div>
         <div className="text-sm font-medium text-muted">Step 2</div>
-        <h2 className="text-xl font-semibold">Connect a revenue stream, get an AI score</h2>
+        <h2 className="text-xl font-semibold">
+          Score a business — demo merchant or your own
+        </h2>
         <p className="mt-1 text-sm text-muted max-w-2xl">
-          Pick a merchant profile — we compute features, ask Claude Sonnet 4.6 for a tier
-          within our policy bands, clamp APR/line to business rules, then sign an EIP-712
-          score attestation that you commit to the <code>CreditLine</code> contract.
+          We extract features from the business, ask DeepSeek for a tier within our
+          policy bands, clamp APR and max-line to hard limits, then sign an
+          EIP-712 score attestation that you commit to the{" "}
+          <code>CreditLine</code> contract.
         </p>
       </div>
 
-      {isLoading && <div className="text-sm text-muted">Loading merchant profiles…</div>}
-
-      <div className="grid gap-3 md:grid-cols-3">
-        {data?.merchants?.map((m) => {
-          const isActive = selected === m.merchantId;
-          const latest = m.windows[m.windows.length - 1];
-          return (
-            <button
-              key={m.merchantId}
-              onClick={() => scoreAndApply(m)}
-              disabled={status.kind === "scoring" || status.kind === "submitting"}
-              className={`text-left rounded-lg border p-4 transition hover:border-ink ${
-                isActive ? "border-ink bg-ink/[0.02]" : "border-border"
-              }`}
-            >
-              <div className="text-xs font-mono text-muted">{m.merchantId}</div>
-              <div className="mt-1 font-semibold">{m.businessName}</div>
-              <div className="text-sm text-muted">{m.industry}</div>
-              <div className="mt-3 text-xs text-muted">
-                Last 30d rev · {formatHkdCents(latest.grossRevenueCents)} · {latest.transactionCount} orders
-              </div>
-            </button>
-          );
-        })}
+      {/* Mode toggle */}
+      <div className="inline-flex rounded-lg border border-border bg-paper p-1">
+        <ToggleBtn active={mode === "demo"} onClick={() => setMode("demo")}>
+          Demo merchant
+        </ToggleBtn>
+        <ToggleBtn active={mode === "custom"} onClick={() => setMode("custom")}>
+          Score my business
+        </ToggleBtn>
       </div>
 
+      {mode === "demo" ? (
+        <>
+          {isLoading && <div className="text-sm text-muted">Loading merchant profiles…</div>}
+
+          <div className="grid gap-3 md:grid-cols-3">
+            {data?.merchants?.map((m) => {
+              const isActive = selected === m.merchantId;
+              const latest = m.windows[m.windows.length - 1];
+              return (
+                <button
+                  key={m.merchantId}
+                  onClick={() => scoreDemoMerchant(m)}
+                  disabled={busy}
+                  className={`text-left rounded-lg border p-4 transition hover:border-ink disabled:opacity-60 disabled:cursor-not-allowed ${
+                    isActive ? "border-ink bg-ink/[0.02]" : "border-border"
+                  }`}
+                >
+                  <div className="text-xs font-mono text-muted">{m.merchantId}</div>
+                  <div className="mt-1 font-semibold">{m.businessName}</div>
+                  <div className="text-sm text-muted">{m.industry}</div>
+                  <div className="mt-3 text-xs text-muted">
+                    Last 30d rev · {formatHkdCents(latest.grossRevenueCents)} · {latest.transactionCount} orders
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <CustomBusinessForm
+          borrower={address}
+          submitting={busy}
+          onScored={async (payload) => {
+            await submitScoreAttestation(payload, "custom business");
+          }}
+        />
+      )}
+
+      {/* Shared status + result ------------------------------------------- */}
+
       {status.kind === "scoring" && (
-        <div className="text-sm text-muted">Scoring {status.merchantId}… (≈5s)</div>
+        <div className="text-sm text-muted">Scoring {status.label}… (≈1-3s with DeepSeek)</div>
       )}
       {status.kind === "submitting" && (
         <div className="text-sm text-muted">Submitting signed score on-chain…</div>
@@ -168,7 +204,7 @@ export function ScorePanel({ fullyVerified, hasScore, onScored }: Props) {
       )}
       {result && hasScore && (status.kind === "done" || status.kind === "idle") && (
         <div className="rounded-lg border border-border bg-paper p-4">
-          <div className="flex items-center gap-6">
+          <div className="flex flex-wrap items-center gap-6">
             <div>
               <div className="text-xs text-muted">Tier</div>
               <div className="text-3xl font-bold">{result.tierLabel}</div>
@@ -186,5 +222,26 @@ export function ScorePanel({ fullyVerified, hasScore, onScored }: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+function ToggleBtn({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-md px-3 py-1.5 text-sm transition ${
+        active ? "bg-ink text-paper font-medium" : "text-muted hover:text-ink"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
